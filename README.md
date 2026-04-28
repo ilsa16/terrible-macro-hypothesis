@@ -13,14 +13,15 @@ Implements the research plan in
 
 ## What's in here
 
-Two independent dashboards, same repo:
+Three dashboards, same repo:
 
-| Lens | Output | Source |
+| Lens | Output | Focus |
 |---|---|---|
-| **Macro** (top-down aggregate) | `dashboard/index.html` | FRED Z.1, ICE BofA, Moody's, SIFMA, U.S. Courts, Fitch |
-| **Issuer** (bottom-up S&P 600) | `dashboard/issuer.html` | EODHD fundamentals (one JSON per ticker) |
+| **Macro** (top-down aggregate) | `dashboard/index.html` | FRED Z.1 + ICE BofA + Moody's + SIFMA + U.S. Courts + Fitch |
+| **Issuer** (bottom-up S&P 600) | `dashboard/issuer.html` | Aggregate / median / sector view of all 479 nonfinancial names |
+| **Credit stress tracker** | `dashboard/credit.html` | Top-decile debtors, 5yr trends, stress-score watchlist |
 
-Both are static HTML files with Plotly via CDN — open them in a browser.
+All three are static HTML files with Plotly via CDN — open in a browser.
 
 ## Headline numbers (FY2019 → latest)
 
@@ -34,6 +35,12 @@ Both are static HTML files with Plotly via CDN — open them in a browser.
 - Aggregate cash: **$173B → $167B (-3%)** — cushion eroding
 - Aggregate interest expense: **$28.8B → $43.4B (+51%)** — rate-shock real money
 
+**Credit-stress lens** (`dashboard/credit.html`, top 10% by debt):
+- **Top 1% (5 issuers) hold 14.4% of debt; top 10% (47 issuers) hold 52.5%** — concentration is real
+- Watchlist median net debt / EBITDA: ~6x; median EBIT interest coverage: ~1.7x
+- Top-decile interest expense FY2020 → FY2025: **+median ~80%** vs EBITDA ~+30%
+- Most-stressed names (ex-REITs): HTZ, JBLU, FUN, AAP, CE, RUN, SABR, VSAT
+
 ## Layout
 
 ```
@@ -44,7 +51,10 @@ Both are static HTML files with Plotly via CDN — open them in a browser.
 │   ├── fetch_sp600_universe.py         # Wikipedia → data/sp600/sp600_current.csv
 │   ├── fetch_eodhd_fundamentals.py     # EODHD JSON cache per ticker
 │   ├── build_issuer_panel.py           # Flatten JSON → long/wide CSV panels
-│   └── build_issuer_dashboard.py       # → dashboard/issuer.html (bottom-up)
+│   ├── build_issuer_dashboard.py       # → dashboard/issuer.html (bottom-up)
+│   ├── build_credit_panel.py           # Richer panel: BS+IS+CF + debt ratios
+│   ├── build_credit_watchlist.py       # Top-decile debtors + stress score
+│   └── build_credit_dashboard.py       # → dashboard/credit.html (concentration)
 ├── data/
 │   ├── fred/                           # FRED raw CSVs
 │   ├── manual/                         # Curated SIFMA/Moody's/AOUSC/Fitch + SOURCES.md
@@ -53,7 +63,8 @@ Both are static HTML files with Plotly via CDN — open them in a browser.
 │   └── summary.csv                     # Macro one-row-per-metric snapshot
 ├── dashboard/
 │   ├── index.html                      # Macro dashboard
-│   └── issuer.html                     # Issuer dashboard
+│   ├── issuer.html                     # Issuer dashboard
+│   └── credit.html                     # Credit-stress tracker
 ├── charts/                             # Reserved for PNG snapshots
 ├── .env.example                        # Copy to .env and add FRED + EODHD keys
 └── us_corporate_debt_research_plan.md  # The original spec
@@ -97,6 +108,26 @@ The full S&P 600 pull is ~600 tickers × ~2s = ~20 minutes; per-ticker JSONs
 are cached in `data/sp600/raw/` so re-runs skip already-fetched names.
 Pass `--force` to re-download.
 
+### Credit-stress tracker
+
+```bash
+python3.11 scripts/build_credit_panel.py        # rich panel (BS + IS + CF + ratios)
+python3.11 scripts/build_credit_watchlist.py    # top 10% by FY2025 total debt
+python3.11 scripts/build_credit_watchlist.py --exclude-re   # ex-REIT watchlist
+python3.11 scripts/build_credit_dashboard.py
+open dashboard/credit.html
+```
+
+Outputs:
+- `data/issuer/credit_panel_annual.csv` — 39 columns, 3,851 ticker-years
+- `data/issuer/concentration_summary.csv` — top 1/5/10/25/50/100% cumulative debt share
+- `data/issuer/top_debtors_watchlist.csv` — 47-name watchlist with stress score
+- `data/issuer/top_debtors_watchlist_no_re.csv` — same, REITs filtered
+
+**Stress score** is a 0-100 composite of: interest coverage (EBIT/interest),
+leverage (net_debt/EBITDA), FCF coverage of debt, and 5-year interest-expense
+growth. Higher = more stressed.
+
 ## Issuer-lens design choices
 
 - **Universe**: current S&P 600 SmallCap constituents that reported FY2018
@@ -130,6 +161,20 @@ Pass `--force` to re-download.
 6. **Issuer aggregation ≠ macro total**: S&P 600 is a thin slice of the
    U.S. corporate universe; the bottom-up sums are NOT comparable to FRED
    BCNSDODNS. The dashboard banner is explicit about this.
+7. **Debt-maturity schedule is NOT in EODHD fundamentals.** The
+   credit-stress dashboard tracks levels and ratios over time, but doesn't
+   show *when* the debt is due. For the refi-wall analysis you asked
+   about — when does the high-debt cohort have to roll? — you'd need:
+   - SEC 10-K parsing (notes-to-financials section "Long-term debt /
+     Maturity of long-term debt")
+   - Bloomberg DDIS function or DDDM (debt distribution by maturity)
+   - S&P Capital IQ → Capital Structure → Debt Maturity Schedule
+   - Moody's CreditView issuer page (rating + maturity wall)
+
+   None of these are in EODHD's standard fundamentals payload. Bond-level
+   data IS available via separate EODHD marketplace endpoints (PRAAMS bond
+   analytics) but per-ISIN, not per-issuer. A 10-K parser is the most
+   practical path; flagged here as a follow-up module.
 
 ## Data lineage
 
