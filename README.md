@@ -13,15 +13,16 @@ Implements the research plan in
 
 ## What's in here
 
-Three dashboards, same repo:
+Four dashboards, same repo:
 
 | Lens | Output | Focus |
 |---|---|---|
 | **Macro** (top-down aggregate) | `dashboard/index.html` | FRED Z.1 + ICE BofA + Moody's + SIFMA + U.S. Courts + Fitch |
 | **Issuer** (bottom-up S&P 600) | `dashboard/issuer.html` | Aggregate / median / sector view of all 479 nonfinancial names |
 | **Credit stress tracker** | `dashboard/credit.html` | Top-decile debtors, 5yr trends, stress-score watchlist |
+| **Refi-wall tracker** | `dashboard/refi_wall.html` | When the watchlist's debt is actually due (SEC XBRL) |
 
-All three are static HTML files with Plotly via CDN — open in a browser.
+All four are static HTML files with Plotly via CDN — open in a browser.
 
 ## Headline numbers (FY2019 → latest)
 
@@ -41,6 +42,12 @@ All three are static HTML files with Plotly via CDN — open in a browser.
 - Top-decile interest expense FY2020 → FY2025: **+median ~80%** vs EBITDA ~+30%
 - Most-stressed names (ex-REITs): HTZ, JBLU, FUN, AAP, CE, RUN, SABR, VSAT
 
+**Refi-wall lens** (`dashboard/refi_wall.html`, SEC XBRL maturity tables):
+- 36/47 watchlist names disclose standard XBRL maturity tables → $239B in scheduled principal
+- **$78B (33%) due within 2 years; $174B (73%) due within 5 years**
+- **18 of 26 stressed names cannot cover their 2-year wall from annual FCF** — they have to roll into a much higher-rate market
+- Hertz alone: $7.9B due within 2 years against -$8.7B FCF
+
 ## Layout
 
 ```
@@ -54,17 +61,22 @@ All three are static HTML files with Plotly via CDN — open in a browser.
 │   ├── build_issuer_dashboard.py       # → dashboard/issuer.html (bottom-up)
 │   ├── build_credit_panel.py           # Richer panel: BS+IS+CF + debt ratios
 │   ├── build_credit_watchlist.py       # Top-decile debtors + stress score
-│   └── build_credit_dashboard.py       # → dashboard/credit.html (concentration)
+│   ├── build_credit_dashboard.py       # → dashboard/credit.html (concentration)
+│   ├── fetch_sec_maturities.py         # SEC EDGAR XBRL company-facts pull
+│   ├── build_maturity_panel.py         # Flatten XBRL → maturity ladders
+│   └── build_maturity_dashboard.py     # → dashboard/refi_wall.html
 ├── data/
 │   ├── fred/                           # FRED raw CSVs
 │   ├── manual/                         # Curated SIFMA/Moody's/AOUSC/Fitch + SOURCES.md
 │   ├── sp600/                          # Universe CSV + raw/{TICKER}.json (git-ignored)
-│   ├── issuer/                         # Long & wide panels, meta, exclusions
+│   ├── issuer/                         # Long & wide panels, watchlists, maturity tables
+│   ├── sec/maturities/                 # SEC XBRL maturity subsets per ticker
 │   └── summary.csv                     # Macro one-row-per-metric snapshot
 ├── dashboard/
 │   ├── index.html                      # Macro dashboard
 │   ├── issuer.html                     # Issuer dashboard
-│   └── credit.html                     # Credit-stress tracker
+│   ├── credit.html                     # Credit-stress tracker
+│   └── refi_wall.html                  # Refi-wall tracker (SEC XBRL)
 ├── charts/                             # Reserved for PNG snapshots
 ├── .env.example                        # Copy to .env and add FRED + EODHD keys
 └── us_corporate_debt_research_plan.md  # The original spec
@@ -128,6 +140,31 @@ Outputs:
 leverage (net_debt/EBITDA), FCF coverage of debt, and 5-year interest-expense
 growth. Higher = more stressed.
 
+### Refi-wall tracker (SEC XBRL, no paid sources)
+
+```bash
+# default = the watchlist (47 names, ~80s with SEC's ~10 req/s rate limit)
+python3.11 scripts/fetch_sec_maturities.py
+# arbitrary tickers:
+python3.11 scripts/fetch_sec_maturities.py HTZ JBLU CZR
+# full S&P 600 (slower):
+python3.11 scripts/fetch_sec_maturities.py --all-sp600
+
+python3.11 scripts/build_maturity_panel.py        # → maturity_long.csv, refi_wall_summary.csv
+python3.11 scripts/build_maturity_dashboard.py    # → dashboard/refi_wall.html
+open dashboard/refi_wall.html
+```
+
+**Source:** SEC's free XBRL Company Facts API
+(`https://data.sec.gov/api/xbrl/companyfacts/CIK<10digit>.json`).
+We extract the standard
+`us-gaap:LongTermDebtMaturitiesRepaymentsOfPrincipalIn{Year{Two..Five}|NextTwelveMonths|AfterYearFive}`
+tags from each company's most recent 10-K and align them to the balance-sheet date.
+
+**Coverage:** 36/47 watchlist names have the standard XBRL maturity ladder.
+Misses are mostly mortgage-REITs and recent spinoffs that don't tag the table.
+For those, 10-K HTML parsing remains the next step (notes-to-financials section).
+
 ## Issuer-lens design choices
 
 - **Universe**: current S&P 600 SmallCap constituents that reported FY2018
@@ -161,20 +198,15 @@ growth. Higher = more stressed.
 6. **Issuer aggregation ≠ macro total**: S&P 600 is a thin slice of the
    U.S. corporate universe; the bottom-up sums are NOT comparable to FRED
    BCNSDODNS. The dashboard banner is explicit about this.
-7. **Debt-maturity schedule is NOT in EODHD fundamentals.** The
-   credit-stress dashboard tracks levels and ratios over time, but doesn't
-   show *when* the debt is due. For the refi-wall analysis you asked
-   about — when does the high-debt cohort have to roll? — you'd need:
-   - SEC 10-K parsing (notes-to-financials section "Long-term debt /
-     Maturity of long-term debt")
-   - Bloomberg DDIS function or DDDM (debt distribution by maturity)
-   - S&P Capital IQ → Capital Structure → Debt Maturity Schedule
-   - Moody's CreditView issuer page (rating + maturity wall)
-
-   None of these are in EODHD's standard fundamentals payload. Bond-level
-   data IS available via separate EODHD marketplace endpoints (PRAAMS bond
-   analytics) but per-ISIN, not per-issuer. A 10-K parser is the most
-   practical path; flagged here as a follow-up module.
+7. **Debt-maturity schedule is NOT in EODHD fundamentals** — addressed
+   via the refi-wall module which pulls SEC XBRL Company Facts. ~77% of
+   the watchlist (36/47) discloses the standard maturity table in machine-
+   readable form. The remainder (mortgage-REITs, recent spinoffs) would
+   need 10-K HTML parsing or a paid source (Bloomberg DDIS, S&P CIQ).
+8. **Maturity tables don't tie to total debt.** Reported principal in the
+   maturity-of-long-term-debt note excludes discounts, premiums, capital
+   leases, fair-value adjustments, and sometimes revolver drawn balances.
+   Don't expect the SEC-disclosed total to equal EODHD `totalDebt`.
 
 ## Data lineage
 

@@ -23,5 +23,8 @@ Thumbs.db
 # Data — large per-ticker JSON cache (regenerate via fetch_eodhd_fundamentals.py)
 data/sp600/raw/
 
+# SEC ticker map (regenerated on first run)
+data/sec/company_tickers.json
+
 # Optional PNG snapshots
 charts/*.png
