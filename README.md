@@ -43,10 +43,18 @@ All four are static HTML files with Plotly via CDN — open in a browser.
 - Most-stressed names (ex-REITs): HTZ, JBLU, FUN, AAP, CE, RUN, SABR, VSAT
 
 **Refi-wall lens** (`dashboard/refi_wall.html`, SEC XBRL maturity tables):
-- 36/47 watchlist names disclose standard XBRL maturity tables → $239B in scheduled principal
-- **$78B (33%) due within 2 years; $174B (73%) due within 5 years**
-- **18 of 26 stressed names cannot cover their 2-year wall from annual FCF** — they have to roll into a much higher-rate market
-- Hertz alone: $7.9B due within 2 years against -$8.7B FCF
+- 30/47 watchlist names have *fresh* XBRL maturity ladders (6 stale, 11 untagged)
+- **The "2026/27 spike" thesis fails for industrial corporates.** $29B of the
+  $45B 2026 number comes from 5 mortgage-REITs (RITM, TWO, ABR, BXMT, MPT)
+  whose business model is rolling repos — not stress.
+- **Stripping mREITs/REITs**: the 22 industrial corporates show $13B due in 2026,
+  $16B in 2027, peaking at **$26B in 2028**, with $50B (33%) pushed beyond 2030.
+  The wall is back-loaded, not concentrated in 2026/27.
+- **16 of 25 names have shorter weighted-avg maturity today than at FY2019.**
+  Median WAM change: -0.29 years. Many of the firms that DID extend (AAP, JBLU,
+  CE, MPT, TRN, SAFE) appear to have done so under stress, not opportunistically.
+- The pain is sustained higher interest cost, not a single cliff year — see
+  the credit dashboard for that signal.
 
 ## Layout
 
@@ -151,6 +159,7 @@ python3.11 scripts/fetch_sec_maturities.py HTZ JBLU CZR
 python3.11 scripts/fetch_sec_maturities.py --all-sp600
 
 python3.11 scripts/build_maturity_panel.py        # → maturity_long.csv, refi_wall_summary.csv
+python3.11 scripts/analyze_maturity_wall.py       # → calendar_maturity_*, wam_by_vintage, etc.
 python3.11 scripts/build_maturity_dashboard.py    # → dashboard/refi_wall.html
 open dashboard/refi_wall.html
 ```

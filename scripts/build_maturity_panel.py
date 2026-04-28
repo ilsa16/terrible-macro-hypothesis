@@ -33,7 +33,8 @@ SEC = ROOT / "data" / "sec"
 MAT = SEC / "maturities"
 ISSUER = ROOT / "data" / "issuer"
 
-# Map tag → (bucket, year_offset)
+# Map tag → (bucket, year_offset). The "core" buckets are the year-N ladder
+# we anchor on; `rem` is auxiliary (only appears in 10-Qs, mid-year stub).
 BUCKETS: list[tuple[str, str, int | None]] = [
     ("LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths", "y1", 1),
     ("LongTermDebtMaturitiesRepaymentsOfPrincipalInYearOne", "y1", 1),
@@ -44,17 +45,39 @@ BUCKETS: list[tuple[str, str, int | None]] = [
     ("LongTermDebtMaturitiesRepaymentsOfPrincipalAfterYearFive", "yGT5", 6),
     ("LongTermDebtMaturitiesRepaymentsOfPrincipalRemainderOfFiscalYear", "rem", 0),
 ]
+CORE_BUCKETS = {"y1", "y2", "y3", "y4", "y5", "yGT5"}
+
+# Anything whose anchor period_end is before this is treated as stale —
+# the company stopped tagging the standard maturity table.
+STALE_CUTOFF = pd.Timestamp("2023-06-01")
 
 
-def latest_obs(units_usd: list[dict]) -> dict | None:
-    """Pick the latest 10-K observation; fall back to latest of any form."""
+def latest_obs(units_usd: list[dict], require_form: str | None = None) -> dict | None:
+    """Pick the latest observation. If require_form is set, restrict to that form
+    (e.g. '10-K'); else fall back to any."""
     if not units_usd:
         return None
-    annual = [v for v in units_usd if v.get("form") == "10-K" and v.get("fp") == "FY"]
-    pool = annual or units_usd
+    pool = units_usd
+    if require_form:
+        pool = [v for v in pool if v.get("form") == require_form]
+        if not pool:
+            return None
     pool = sorted(pool, key=lambda v: (v.get("end") or "", v.get("filed") or ""),
                   reverse=True)
     return pool[0]
+
+
+def latest_10k_end(maturity: dict) -> str | None:
+    """Latest 10-K end-date observed across all CORE buckets — the anchor."""
+    ends = []
+    for tag, bucket, _ in BUCKETS:
+        if bucket not in CORE_BUCKETS or tag not in maturity:
+            continue
+        usd = (maturity[tag].get("units") or {}).get("USD") or []
+        ks = [v for v in usd if v.get("form") == "10-K" and v.get("fp") == "FY"]
+        if ks:
+            ends.append(max(v.get("end") or "" for v in ks))
+    return max(ends) if ends else None
 
 
 def process_ticker(path: Path) -> tuple[list[dict], dict]:
@@ -72,37 +95,53 @@ def process_ticker(path: Path) -> tuple[list[dict], dict]:
         "y5": None, "yGT5": None, "rem": None,
         "total_in_table": 0.0,
         "n_buckets": 0,
+        "is_stale": False,
     }
     mat = raw.get("maturity") or {}
     if not mat:
         return rows, summary
 
-    # Collect the latest 10-K observation per bucket.
-    # All buckets in a filing should share the same `end` date.
+    # Anchor on the latest 10-K end date that has CORE buckets reported.
+    # This avoids being misled by `RemainderOfFiscalYear` 10-Q observations
+    # that move the anchor forward but don't carry the year-N ladder.
+    anchor_end = latest_10k_end(mat)
+    if anchor_end is None:
+        # No 10-K core-bucket data; fall back to whatever is latest
+        anchor_end = max(
+            (v.get("end") or "" for tag, bucket, _ in BUCKETS
+             if tag in mat and bucket in CORE_BUCKETS
+             for v in (mat[tag].get("units") or {}).get("USD") or []),
+            default=None,
+        )
+    if anchor_end is None:
+        return rows, summary
+
+    summary["is_stale"] = pd.Timestamp(anchor_end) < STALE_CUTOFF
+
+    # For each bucket, pick the observation matching anchor_end (10-K preferred).
     chosen: dict[str, dict] = {}
     for tag, bucket, _ in BUCKETS:
         if tag not in mat:
             continue
         usd = (mat[tag].get("units") or {}).get("USD") or []
-        obs = latest_obs(usd)
-        if obs is None:
-            continue
-        # If we already have a candidate for this bucket from a more recent
-        # filing, keep the newer one.
-        prior = chosen.get(bucket)
-        if prior is None or (obs.get("end") or "") > (prior.get("end") or ""):
-            chosen[bucket] = obs
+        # First try exact-match 10-K at anchor
+        match = [v for v in usd if v.get("end") == anchor_end and
+                 v.get("form") == "10-K" and v.get("fp") == "FY"]
+        if not match:
+            # Then any form at anchor (catches `rem` from a Q if anchor is a Q)
+            match = [v for v in usd if v.get("end") == anchor_end]
+        if match:
+            chosen[bucket] = match[0]
 
-    if not chosen:
+    if not any(b in chosen for b in CORE_BUCKETS):
         return rows, summary
 
-    # Anchor on the most-recent end date — only keep buckets for that filing.
-    anchor_end = max(v.get("end") for v in chosen.values())
-    chosen = {k: v for k, v in chosen.items() if v.get("end") == anchor_end}
-
+    fy = None
+    for v in chosen.values():
+        if v.get("fp") == "FY":
+            fy = v.get("fy"); break
     summary["period_end"] = anchor_end
-    fy = next(iter(chosen.values())).get("fy")
-    summary["fy"] = fy
+    summary["fy"] = fy or next(iter(chosen.values())).get("fy")
     summary["form"] = next(iter(chosen.values())).get("form")
     summary["filed"] = next(iter(chosen.values())).get("filed")
 

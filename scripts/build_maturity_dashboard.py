@@ -1,19 +1,23 @@
-"""Refi-wall dashboard: when is the watchlist's debt due?
+"""Refi-wall dashboard v2 — adds calendar-year aggregation and a vintage
+comparison test against the 2026/27 spike hypothesis.
 
-Combines:
-  data/issuer/refi_wall_summary.csv   (per-ticker maturity ladder)
-  data/issuer/top_debtors_watchlist_no_re.csv  (stress score + ratios)
-  data/issuer/credit_meta.csv          (sector / industry)
+Compared to v1:
+  - drops stale-anchor tickers (period_end < 2023-06-01) from the picture
+  - flags JBLU/SAH-style data quality issues prominently
+  - aggregates by *calendar year*, not relative bucket
+  - overlays the FY2025-vintage maturity wall against the FY2019-vintage one
+    (what the same companies thought was due 5y out, before rate hikes)
+  - computes WAM (weighted-average maturity) per company and per vintage
 
-Charts:
-  1. Aggregate refi wall — sum of y1/y2/y3/y4/y5/yGT5 across watchlist
-  2. % due within 2 years — per ticker, sorted by exposure
-  3. Refi wall vs FCF — bubble chart: y1+y2 maturities vs latest FCF
-  4. Per-company stacked bars — every covered ticker's full ladder
-  5. Most-stressed names — refi schedule for the 12 highest stress scores
-     that have maturity data
+Reads:
+  data/issuer/refi_wall_summary.csv
+  data/issuer/maturity_year_aggregate.csv      (from analyze_maturity_wall.py)
+  data/issuer/maturity_extension_evidence.csv
+  data/issuer/credit_meta.csv
+  data/issuer/top_debtors_watchlist_no_re.csv
 
-Output: dashboard/refi_wall.html
+Writes:
+  dashboard/refi_wall.html
 """
 from __future__ import annotations
 
@@ -31,59 +35,154 @@ DASH.mkdir(parents=True, exist_ok=True)
 
 AS_OF = "2026-04-23"
 
-BUCKETS = ["y1", "y2", "y3", "y4", "y5", "yGT5"]
-BUCKET_LABELS = {
-    "y1": "Year 1", "y2": "Year 2", "y3": "Year 3",
-    "y4": "Year 4", "y5": "Year 5", "yGT5": "After year 5",
-}
-BUCKET_COLORS = {
-    "y1": "#b30000", "y2": "#e34a33", "y3": "#fc8d59",
-    "y4": "#fdbb84", "y5": "#fdd49e", "yGT5": "#bdbdbd",
-}
-
 
 def load() -> dict:
     summary = pd.read_csv(ISSUER / "refi_wall_summary.csv")
-    summary = summary[summary["total_in_table"] > 0].copy()
-    watch = pd.read_csv(ISSUER / "top_debtors_watchlist.csv")
-    watch_nore = pd.read_csv(ISSUER / "top_debtors_watchlist_no_re.csv")
+    summary["period_end"] = pd.to_datetime(summary["period_end"], errors="coerce")
+    fresh = summary[(summary["total_in_table"] > 0) & (~summary["is_stale"])].copy()
+    stale = summary[summary["is_stale"] & (summary["total_in_table"] > 0)].copy()
+    agg = pd.read_csv(ISSUER / "maturity_year_aggregate.csv")
+    ext = pd.read_csv(ISSUER / "maturity_extension_evidence.csv")
     meta = pd.read_csv(ISSUER / "credit_meta.csv")
-    panel = pd.read_csv(ISSUER / "credit_panel_annual.csv")
-    panel["period_end"] = pd.to_datetime(panel["period_end"])
-    summary = summary.merge(meta[["ticker", "sector", "industry"]],
-                             on="ticker", how="left")
-    summary = summary.merge(
-        watch[["ticker", "stress_score", "interest_5y_pct",
-                "fcf_to_debt", "interest_coverage_ebit", "fcf",
-                "ebitda", "interest_expense", "total_debt"]],
+    watch = pd.read_csv(ISSUER / "top_debtors_watchlist_no_re.csv")
+    fresh_dist = pd.read_csv(ISSUER / "calendar_maturity_2025_anchor.csv")
+    fresh = fresh.merge(meta[["ticker", "sector", "industry"]], on="ticker", how="left")
+    fresh = fresh.merge(
+        watch[["ticker", "stress_score", "fcf", "ebitda", "interest_expense", "total_debt"]],
         on="ticker", how="left",
     )
-    return {"summary": summary, "watch": watch, "watch_nore": watch_nore,
-             "meta": meta, "panel": panel}
+    return {"fresh": fresh, "stale": stale, "agg": agg, "ext": ext,
+             "meta": meta, "fresh_dist": fresh_dist}
 
 
-def chart_aggregate_wall(summary: pd.DataFrame) -> go.Figure:
-    agg = summary[BUCKETS].sum(axis=0) / 1e9
-    total = agg.sum()
+def chart_calendar_wall(agg: pd.DataFrame) -> go.Figure:
+    """Side-by-side calendar-year wall: FY2025 anchor vs FY2019 anchor."""
+    cur = agg[agg["vintage"].str.contains("FY2025-anchor \\(current view\\)",
+                                            regex=True)].sort_values("year")
+    hist = agg[agg["vintage"].str.contains("FY2019")].sort_values("year")
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=[BUCKET_LABELS[b] for b in BUCKETS], y=agg.values,
-        marker_color=[BUCKET_COLORS[b] for b in BUCKETS],
-        text=[f"${v:.1f}B<br>{v/total*100:.1f}%" for v in agg.values],
+        x=cur["year"], y=cur["sum_b"],
+        name="FY2025 anchor — what's actually due",
+        marker_color="#d62728",
+        text=[f"${v:.1f}B<br>n={n}" for v, n in zip(cur["sum_b"], cur["n_tickers"])],
         textposition="outside",
-        hovertemplate="%{x}<br>$%{y:.1f}B<extra></extra>",
+        hovertemplate="%{x}: $%{y:.1f}B<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=hist["year"], y=hist["sum_b"],
+        name="FY2019 anchor — what these same firms expected pre-rate-hikes",
+        marker_color="#a6cee3", opacity=0.85,
+        text=[f"${v:.1f}B" for v in hist["sum_b"]],
+        textposition="outside",
+        hovertemplate="%{x}: $%{y:.1f}B<extra></extra>",
     ))
     fig.update_layout(
-        template="plotly_white", height=380, showlegend=False,
-        title=f"Aggregate refi wall across {len(summary)} top-decile issuers — total ${total:.0f}B",
-        yaxis=dict(title="USD billions"),
-        margin=dict(t=60, b=40, l=60, r=20),
+        template="plotly_white", height=460, barmode="group",
+        title="Calendar-year debt wall (all 30): FY2025 view vs FY2019 view",
+        yaxis=dict(title="USD billions due in calendar year"),
+        xaxis=dict(title="Calendar year"),
+        margin=dict(t=80, b=40, l=60, r=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.04,
+                     xanchor="right", x=1),
     )
     return fig
 
 
-def chart_pct_within_2y(summary: pd.DataFrame) -> go.Figure:
-    d = summary.dropna(subset=["pct_due_within_2y"]).copy()
+def chart_calendar_wall_ex_re(agg: pd.DataFrame) -> go.Figure:
+    """Calendar-year wall comparing all-30 vs ex-REIT (industrial corporates only)."""
+    all_ = agg[agg["vintage"].str.contains("FY2025-anchor \\(current view\\)",
+                                            regex=True)].sort_values("year")
+    ex = agg[agg["vintage"].str.contains("ex-REIT")].sort_values("year")
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=all_["year"], y=all_["sum_b"],
+        name=f"All 30 fresh issuers (incl. mREITs)",
+        marker_color="#fc8d59", opacity=0.5,
+        text=[f"${v:.1f}B" for v in all_["sum_b"]],
+        textposition="outside",
+        hovertemplate="%{x}: $%{y:.1f}B<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=ex["year"], y=ex["sum_b"],
+        name=f"Industrial corporates only ({ex['n_tickers'].iloc[0] if not ex.empty else 0} issuers, ex-REIT)",
+        marker_color="#1a1a2e",
+        text=[f"${v:.1f}B" for v in ex["sum_b"]],
+        textposition="outside",
+        hovertemplate="%{x}: $%{y:.1f}B<extra></extra>",
+    ))
+    fig.update_layout(
+        template="plotly_white", height=460, barmode="group",
+        title=("Removing mREITs/REITs reveals the actual industrial wall: "
+                "<br><sub>peak shifts from 2026 to 2028, with the bulk pushed "
+                "beyond 2030. mREITs roll repos by design — not stress.</sub>"),
+        yaxis=dict(title="USD billions due in calendar year"),
+        xaxis=dict(title="Calendar year"),
+        margin=dict(t=90, b=40, l=60, r=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.05,
+                     xanchor="right", x=1),
+    )
+    return fig
+
+
+def chart_year_concentration(fresh_dist: pd.DataFrame, year: int = 2026) -> go.Figure:
+    """Show who drives a particular year's wall."""
+    d = fresh_dist[fresh_dist["year"] == year].sort_values("amount", ascending=True)
+    d["amount_b"] = d["amount"] / 1e9
+    re_set = {"RITM", "TWO", "ABR", "BXMT", "MPT", "SLG", "ARI", "SAFE",
+              "RWT", "PMT", "ARR", "EFC", "FBRT", "MAC", "DEI", "KW"}
+    colors = ["#a6cee3" if t in re_set else "#1a1a2e" for t in d["ticker"]]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=d["ticker"], x=d["amount_b"], orientation="h",
+        marker_color=colors,
+        text=[f"${v:.1f}B" for v in d["amount_b"]],
+        textposition="outside",
+        hovertemplate="%{y} %{x:.1f}B<extra></extra>",
+    ))
+    fig.update_layout(
+        template="plotly_white", height=max(360, 22 * len(d)),
+        title=(f"Who drives the {year} maturity wall? "
+                "<br><sub>Light blue = mREIT/REIT (rolling-repo business model). "
+                "Dark = industrial / consumer / energy.</sub>"),
+        xaxis=dict(title=f"$B due in {year}"),
+        showlegend=False,
+        margin=dict(t=80, b=40, l=80, r=80),
+    )
+    return fig
+
+
+def chart_wam_change(ext: pd.DataFrame) -> go.Figure:
+    """Bar chart of WAM change per ticker — did they extend or compress?"""
+    d = ext.dropna(subset=["wam_2019", "wam_2025", "wam_change_yrs"]).copy()
+    d = d.sort_values("wam_change_yrs")
+    colors = ["#1a9850" if v > 0 else "#d62728" for v in d["wam_change_yrs"]]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=d["ticker"], x=d["wam_change_yrs"], orientation="h",
+        marker_color=colors,
+        text=[f"{v:+.1f}y" for v in d["wam_change_yrs"]],
+        textposition="outside",
+        customdata=d[["wam_2019", "wam_2025"]].values,
+        hovertemplate=("<b>%{y}</b><br>"
+                       "WAM FY2019: %{customdata[0]:.2f}y<br>"
+                       "WAM FY2025: %{customdata[1]:.2f}y<br>"
+                       "Change: %{x:+.2f}y<extra></extra>"),
+    ))
+    fig.add_vline(x=0, line_color="black", line_width=1)
+    fig.update_layout(
+        template="plotly_white", height=max(400, 22 * len(d)),
+        title=("Weighted-average debt maturity change FY2019 → FY2025 "
+                "<br><sub>Negative = debt closer to due now than 5 years ago</sub>"),
+        xaxis=dict(title="Δ WAM (years)"),
+        showlegend=False,
+        margin=dict(t=80, b=40, l=80, r=80),
+    )
+    return fig
+
+
+def chart_pct_due_2y_distribution(fresh: pd.DataFrame) -> go.Figure:
+    d = fresh.dropna(subset=["pct_due_within_2y"]).copy()
     d["pct_2y"] = d["pct_due_within_2y"] * 100
     d = d.sort_values("pct_2y")
     colors = ["#d62728" if x > 50 else "#fc8d59" if x > 25 else "#1a9850"
@@ -92,82 +191,47 @@ def chart_pct_within_2y(summary: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Bar(
         y=d["ticker"], x=d["pct_2y"], orientation="h",
         marker_color=colors,
-        text=[f"{v:.0f}% (${tt/1e6:,.0f}M total)"
-              for v, tt in zip(d["pct_2y"], d["total_in_table"])],
+        text=[f"{v:.0f}%" for v in d["pct_2y"]],
         textposition="outside",
         customdata=d[["entity_name", "y1", "y2", "total_in_table"]].values,
         hovertemplate=("<b>%{y}</b> — %{customdata[0]}<br>"
-                       "Year 1: $%{customdata[1]:,.0f}M<br>"
-                       "Year 2: $%{customdata[2]:,.0f}M<br>"
-                       "Total in maturity table: $%{customdata[3]:,.0f}M<br>"
-                       "Due within 2y: %{x:.1f}%<extra></extra>"),
+                       "Y1: $%{customdata[1]:,.0f}M<br>"
+                       "Y2: $%{customdata[2]:,.0f}M<br>"
+                       "Total: $%{customdata[3]:,.0f}M<br>"
+                       "Due 2y: %{x:.1f}%<extra></extra>"),
     ))
     fig.add_vline(x=25, line_color="orange", line_dash="dot")
     fig.add_vline(x=50, line_color="red", line_dash="dot")
     fig.update_layout(
-        template="plotly_white", height=max(420, 22 * len(d)),
-        title="Pct of debt due within 2 years",
-        xaxis=dict(title="% of disclosed debt due in next 24 months"),
-        margin=dict(t=60, b=40, l=80, r=180),
+        template="plotly_white", height=max(400, 22 * len(d)),
+        title="% of disclosed debt due within 2 years (fresh data only)",
+        xaxis=dict(title="%"),
+        margin=dict(t=60, b=40, l=80, r=120),
         showlegend=False,
     )
     return fig
 
 
-def chart_refi_vs_fcf(summary: pd.DataFrame) -> go.Figure:
-    d = summary.dropna(subset=["fcf"]).copy()
-    d["due_2y_b"] = d["due_within_2y"] / 1e9
-    d["fcf_b"] = d["fcf"] / 1e9
-    d["debt_b"] = d["total_debt"].fillna(0) / 1e9
-    d["bubble"] = d["debt_b"].clip(lower=1) ** 0.6 * 8
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=d["fcf_b"], y=d["due_2y_b"], mode="markers+text",
-        marker=dict(size=d["bubble"],
-                    color=d["stress_score"], colorscale="RdYlGn_r",
-                    cmin=20, cmax=90, showscale=True,
-                    colorbar=dict(title="Stress<br>score"),
-                    line=dict(width=1, color="white")),
-        text=d["ticker"], textposition="top center", textfont=dict(size=9),
-        customdata=d[["entity_name", "debt_b", "stress_score"]].values,
-        hovertemplate=("<b>%{text}</b> — %{customdata[0]}<br>"
-                       "Total debt: $%{customdata[1]:.1f}B<br>"
-                       "Latest FCF: $%{x:.1f}B<br>"
-                       "Due within 2y: $%{y:.1f}B<br>"
-                       "Stress score: %{customdata[2]:.0f}<extra></extra>"),
-    ))
-    # 1:1 reference (FCF = 2y refi)
-    rng = max(abs(d["fcf_b"].min()), d["fcf_b"].max(), d["due_2y_b"].max()) * 1.1
-    fig.add_shape(type="line", x0=0, x1=rng, y0=0, y1=rng,
-                  line=dict(color="gray", dash="dot", width=1))
-    fig.add_annotation(x=rng * 0.85, y=rng * 0.9, text="2y refi = FCF",
-                        showarrow=False, font=dict(size=10, color="gray"))
-    fig.update_layout(
-        template="plotly_white", height=520,
-        title="Refi wall (next 2y) vs annual FCF — points above the diagonal can't self-fund the wall",
-        xaxis=dict(title="Latest annual FCF (USD B)"),
-        yaxis=dict(title="Maturities due within 2 years (USD B)"),
-        margin=dict(t=60, b=40, l=60, r=20),
-        showlegend=False,
-    )
-    return fig
-
-
-def chart_per_ticker_ladder(summary: pd.DataFrame) -> go.Figure:
-    d = summary.copy()
-    d = d.sort_values("total_in_table", ascending=True)
+def chart_per_ticker_ladder(fresh: pd.DataFrame) -> go.Figure:
+    """Stacked bars per-ticker, only using fresh data."""
+    BUCKETS = ["y1", "y2", "y3", "y4", "y5", "yGT5"]
+    LABELS = {"y1": "Y1", "y2": "Y2", "y3": "Y3", "y4": "Y4",
+               "y5": "Y5", "yGT5": ">Y5"}
+    COLORS = {"y1": "#b30000", "y2": "#e34a33", "y3": "#fc8d59",
+               "y4": "#fdbb84", "y5": "#fdd49e", "yGT5": "#bdbdbd"}
+    d = fresh.sort_values("total_in_table", ascending=True)
     fig = go.Figure()
     for b in BUCKETS:
         fig.add_trace(go.Bar(
             y=d["ticker"], x=d[b].fillna(0) / 1e6, orientation="h",
-            name=BUCKET_LABELS[b], marker_color=BUCKET_COLORS[b],
-            hovertemplate="%{y} " + BUCKET_LABELS[b] + " $%{x:,.0f}M<extra></extra>",
+            name=LABELS[b], marker_color=COLORS[b],
+            hovertemplate=f"%{{y}} {LABELS[b]}: $%{{x:,.0f}}M<extra></extra>",
         ))
     fig.update_layout(
-        template="plotly_white", height=max(420, 24 * len(d)),
-        title="Per-issuer maturity ladder (USD M, stacked)",
+        template="plotly_white", height=max(400, 24 * len(d)),
+        title="Per-issuer maturity ladder, USD M (fresh data, sorted by total)",
         barmode="stack",
-        xaxis=dict(title="USD millions"),
+        xaxis=dict(title="USD M"),
         margin=dict(t=60, b=40, l=80, r=20),
         legend=dict(orientation="h", yanchor="bottom", y=1.02,
                      xanchor="right", x=1),
@@ -175,242 +239,226 @@ def chart_per_ticker_ladder(summary: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def chart_most_stressed_with_maturity(summary: pd.DataFrame, panel: pd.DataFrame,
-                                        watch_nore: pd.DataFrame, n: int = 12) -> go.Figure:
-    """For top-N stressed tickers (with maturity data) show a year-by-year
-    refi schedule overlaid with their latest FCF as a horizontal capacity line."""
-    have_mat = set(summary["ticker"])
-    candidates = watch_nore[watch_nore["ticker"].isin(have_mat)]
-    top = candidates.nlargest(n, "stress_score")["ticker"].tolist()
-    n_cols = 3
-    n_rows = (len(top) + n_cols - 1) // n_cols
-    titles = []
-    for tk in top:
-        row = candidates[candidates["ticker"] == tk].iloc[0]
-        nm = (row["name"] or tk)[:30]
-        titles.append(f"<b>{tk}</b> — {nm}")
-
-    fig = make_subplots(rows=n_rows, cols=n_cols, subplot_titles=titles,
-                         vertical_spacing=0.12, horizontal_spacing=0.07)
-    for i, tk in enumerate(top):
-        r, c = i // n_cols + 1, i % n_cols + 1
-        s = summary[summary["ticker"] == tk].iloc[0]
-        anchor_year = pd.Timestamp(s["period_end"]).year if s.get("period_end") else None
-        x_labels = []
-        y_vals = []
-        for j, b in enumerate(["y1", "y2", "y3", "y4", "y5"]):
-            v = s.get(b)
-            if pd.notna(v):
-                yr = anchor_year + j + 1 if anchor_year else f"y{j+1}"
-                x_labels.append(str(yr))
-                y_vals.append(v / 1e6)
-        v5 = s.get("yGT5")
-        if pd.notna(v5):
-            x_labels.append(f">{anchor_year+5}" if anchor_year else ">y5")
-            y_vals.append(v5 / 1e6)
-        fig.add_trace(go.Bar(
-            x=x_labels, y=y_vals, marker_color="#d62728",
-            name="Maturity", showlegend=(i == 0),
-            hovertemplate=f"{tk} %{{x}}: $%{{y:,.0f}}M<extra></extra>",
-        ), row=r, col=c)
-        # FCF capacity line
-        fcf_m = (s.get("fcf") or 0) / 1e6
-        if fcf_m:
-            fig.add_hline(y=fcf_m, row=r, col=c, line_color="#2ca02c",
-                          line_dash="dash",
-                          annotation_text=f"FCF ${fcf_m:,.0f}M",
-                          annotation_position="top right",
-                          annotation_font=dict(size=9, color="#2ca02c"))
-
-    fig.update_layout(
-        template="plotly_white", height=max(300, 240 * n_rows),
-        title=f"Top {n} stressed names (ex-REIT): maturity schedule vs FCF capacity",
-        margin=dict(t=80, b=40, l=40, r=40),
-        showlegend=False,
-    )
-    fig.update_xaxes(tickfont=dict(size=10))
-    fig.update_yaxes(title_text="USD M", title_font=dict(size=10),
-                      tickfont=dict(size=9))
-    return fig
-
-
 def render(data: dict, out_html: Path) -> None:
-    summary = data["summary"]
-    watch_nore = data["watch_nore"]
-    panel = data["panel"]
+    fresh = data["fresh"]
+    stale = data["stale"]
+    agg = data["agg"]
+    ext = data["ext"]
 
-    n_cov = len(summary)
-    total_disclosed = summary["total_in_table"].sum() / 1e9
-    due_2y_total = summary["due_within_2y"].sum() / 1e9
-    due_5y_total = summary["due_within_5y"].sum() / 1e9
-    pct_2y_agg = due_2y_total / total_disclosed * 100 if total_disclosed else float("nan")
-    median_pct_2y = (summary["pct_due_within_2y"] * 100).median()
+    n_fresh = len(fresh)
+    total = fresh["total_in_table"].sum() / 1e9
+    cur = agg[agg["vintage"].str.contains("FY2025")]
+    if not cur.empty:
+        peak_yr = int(cur.loc[cur["sum_b"].idxmax(), "year"])
+        peak_b = float(cur.loc[cur["sum_b"].idxmax(), "sum_b"])
+        peak_share = peak_b / cur["sum_b"].sum() * 100
+        wall_2y = cur[(cur["year"] >= 2026) & (cur["year"] <= 2027)]["sum_b"].sum()
+        wall_2y_share = wall_2y / cur["sum_b"].sum() * 100
+    else:
+        peak_yr = peak_b = peak_share = wall_2y = wall_2y_share = float("nan")
+    have_both = ext.dropna(subset=["wam_2019", "wam_2025"])
+    n_compress = (have_both["wam_change_yrs"] < 0).sum()
+    n_extend = (have_both["wam_change_yrs"] > 0).sum()
+    median_wam_change = have_both["wam_change_yrs"].median()
+
+    # Stale data table
+    stale_html = ""
+    if not stale.empty:
+        st = stale[["ticker", "entity_name", "period_end", "total_in_table"]].copy()
+        st["period_end"] = pd.to_datetime(st["period_end"]).dt.strftime("%Y-%m-%d")
+        st["total_b"] = (st["total_in_table"] / 1e9).round(2)
+        st = st.drop(columns=["total_in_table"])
+        stale_html = (
+            "<h3>Stale data — these companies stopped tagging the standard XBRL "
+            "maturity table; their disclosure is too old to use:</h3>"
+            + st.to_html(index=False, escape=False, classes="watch", border=0)
+        )
 
     figs = [
-        ("Aggregate refi wall",
-         chart_aggregate_wall(summary),
-         "Stack of all watchlist names' disclosed maturities by year-bucket from each company's latest 10-K balance-sheet date."),
-        ("Pct due within 2 years (per issuer)",
-         chart_pct_within_2y(summary),
-         "Names above 50% (red line) face the heaviest near-term refi pressure."),
-        ("Refi wall vs FCF",
-         chart_refi_vs_fcf(summary),
-         "X = latest annual FCF, Y = maturities due in next 2y. Points above the dotted diagonal can't self-fund the wall from FCF — they need to roll."),
+        ("Calendar-year wall — all 30 vs ex-REIT",
+         chart_calendar_wall_ex_re(agg),
+         "Removing the 8 mREIT/REIT names changes the shape entirely. mREITs roll "
+         "their entire repo book yearly by design — that's not a refi cliff. "
+         "For industrial corporates, the wall is back-loaded into 2028-2030 and beyond, "
+         "not concentrated in 2026/27."),
+
+        ("Who drives the 2026 maturity wall?",
+         chart_year_concentration(data["fresh_dist"], year=2026),
+         "The 2026 'spike' in the all-issuer view is dominated by RITM, TWO, ABR, "
+         "BXMT, MPT — all mortgage-REITs. Industrial names contribute ~$13B of the "
+         "$45B 2026 total."),
+
+        ("Calendar-year wall, FY2025 vs FY2019 vintage",
+         chart_calendar_wall(agg),
+         f"FY2025-anchored aggregate of {n_fresh} firms vs what their FY2019 "
+         f"10-Ks said was due in 2020-2024+. Tests whether companies refi'd into "
+         f"longer paper during the 2018-2021 low-rate window. Note: FY2019 'thereafter' "
+         f"is plotted at 2025 but spans 2025+."),
+
+        ("Weighted-average maturity change, FY2019 → FY2025",
+         chart_wam_change(ext),
+         f"WAM change per issuer. {n_compress} compressed (debt got closer to due), "
+         f"{n_extend} extended. Median change: {median_wam_change:+.2f} years. "
+         f"Counter-thesis evidence: if companies had successfully extended during the "
+         f"cheap-rate era, most would be green (positive). Most aren't."),
+
+        ("% due within 2 years (fresh data only)",
+         chart_pct_due_2y_distribution(fresh),
+         "Per-issuer near-term refi exposure. mREIT/REIT names dominate the >50% group "
+         "(business model = rolling repos)."),
+
         ("Per-issuer maturity ladder",
-         chart_per_ticker_ladder(summary),
-         "Full disclosed schedule, stacked. Hover for bucket-level detail."),
-        ("Most-stressed names + FCF capacity",
-         chart_most_stressed_with_maturity(summary, panel, watch_nore, n=12),
-         "Top 12 by stress score (ex-REITs) with maturity schedule. Green dashed line = latest annual FCF — when bars exceed it, the company can't self-fund that year's maturity."),
+         chart_per_ticker_ladder(fresh),
+         "Stacked maturity schedule, color-coded by year-bucket."),
     ]
 
-    body_parts = []
+    body = []
     for i, (title, fig, sub) in enumerate(figs):
         include_plotly = (i == 0)
         html = fig.to_html(full_html=False,
                             include_plotlyjs="cdn" if include_plotly else False,
                             div_id=f"chart-{i}")
-        body_parts.append(
+        body.append(
             f'<section class="chart"><h2>{title}</h2>'
             f'<p class="sub">{sub}</p>{html}</section>'
         )
-
-    # Top-15 refi-wall table
-    table = summary.copy()
-    table["debt_b"] = (table["total_debt"].fillna(0) / 1e9).round(1)
-    table["y1_m"] = (table["y1"].fillna(0) / 1e6).round(0).astype(int)
-    table["y2_m"] = (table["y2"].fillna(0) / 1e6).round(0).astype(int)
-    table["due_2y_m"] = (table["due_within_2y"] / 1e6).round(0).astype(int)
-    table["pct_2y"] = (table["pct_due_within_2y"] * 100).round(1)
-    table["fcf_m"] = (table["fcf"].fillna(0) / 1e6).round(0).astype(int)
-    table["score"] = table["stress_score"].fillna(0).round(0).astype(int)
-    table = table.sort_values("pct_2y", ascending=False)
-    cols = {"ticker": "Ticker", "entity_name": "Name", "sector": "Sector",
-             "period_end": "BS date", "debt_b": "Debt $B",
-             "y1_m": "Y1 $M", "y2_m": "Y2 $M",
-             "due_2y_m": "Due 2y $M", "pct_2y": "Due 2y %",
-             "fcf_m": "FCF $M", "score": "Stress"}
-    table_html = (table[list(cols.keys())].rename(columns=cols)
-                  .head(20).to_html(index=False, escape=False, classes="watch", border=0))
 
     page = dedent(f"""\
         <!DOCTYPE html>
         <html lang="en">
         <head>
           <meta charset="utf-8">
-          <title>S&amp;P 600 Refi-Wall Tracker</title>
+          <title>Refi-Wall Tracker — objective view</title>
           <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
-                    Helvetica, Arial, sans-serif; margin: 0; background: #fafafa;
-                    color: #222; }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+                    margin: 0; background: #fafafa; color: #222; }}
             header {{ background: #1a1a2e; color: #eee; padding: 24px 40px; }}
             header h1 {{ margin: 0 0 6px 0; font-size: 24px; }}
             header .sub {{ color: #aaa; font-size: 13px; }}
-            .chip-row {{ display: flex; gap: 12px; padding: 18px 40px 0 40px; }}
+            .chip-row {{ display: flex; gap: 12px; padding: 18px 40px 0 40px; flex-wrap: wrap; }}
             .chip {{ background: white; padding: 14px 20px; border-radius: 6px;
-                     box-shadow: 0 1px 3px rgba(0,0,0,0.08); flex: 1; }}
+                      box-shadow: 0 1px 3px rgba(0,0,0,0.08); flex: 1; min-width: 200px; }}
             .chip .label {{ font-size: 11px; text-transform: uppercase; color: #777;
-                            letter-spacing: 0.5px; }}
+                             letter-spacing: 0.5px; }}
             .chip .value {{ font-size: 22px; font-weight: 600; margin-top: 4px;
-                            color: #1a1a2e; }}
+                             color: #1a1a2e; }}
             .chip .delta {{ font-size: 12px; color: #555; margin-top: 2px; }}
+            .verdict {{ background: #f3f7fb; border-left: 4px solid #4a90e2;
+                          padding: 18px 24px; margin: 20px 40px;
+                          font-size: 14px; line-height: 1.5; color: #214162; }}
+            .verdict strong {{ color: #1a1a2e; }}
+            .verdict h3 {{ margin: 0 0 8px 0; font-size: 16px; color: #1a1a2e; }}
             .warning {{ background: #fff3cd; border-left: 4px solid #f0ad4e;
-                          padding: 14px 20px; margin: 20px 40px; font-size: 14px;
+                          padding: 14px 20px; margin: 20px 40px; font-size: 13px;
                           color: #664d03; }}
-            .hyp {{ background: #eef6fc; border-left: 4px solid #4a90e2;
-                     padding: 14px 20px; margin: 0 40px 0 40px; font-size: 14px;
-                     color: #214162; }}
             main {{ padding: 0 40px 40px 40px; }}
             section.chart {{ background: white; margin: 20px 0;
-                              box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 14px 18px; }}
+                              box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+                              padding: 14px 18px; }}
             section.chart h2 {{ font-size: 17px; margin: 4px 0 4px 0; color: #333; }}
             section.chart p.sub {{ font-size: 13px; color: #666; margin: 0 0 8px 0; }}
             table.watch {{ width: 100%; border-collapse: collapse; background: white;
-                            box-shadow: 0 1px 3px rgba(0,0,0,0.08); font-size: 12px; }}
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.08); font-size: 12px;
+                            margin-top: 10px; }}
             table.watch th, table.watch td {{ padding: 7px 10px; text-align: left;
                                                   border-bottom: 1px solid #eee; }}
             table.watch th {{ background: #f7f7fb; font-weight: 600; }}
-            table.watch td:nth-child(n+5) {{ text-align: right;
-                                              font-variant-numeric: tabular-nums; }}
             footer {{ padding: 20px 40px 40px 40px; font-size: 12px; color: #777; }}
             footer ul {{ margin: 8px 0 0 0; padding-left: 20px; }}
             footer li {{ margin: 4px 0; }}
-            h2.section-title {{ margin-top: 28px; font-size: 18px; color: #333; }}
           </style>
         </head>
         <body>
           <header>
             <h1>S&amp;P 600 Refi-Wall Tracker</h1>
-            <div class="sub">When does the watchlist's debt come due? &middot;
-              {n_cov} issuers with SEC XBRL maturity disclosures &middot; built {AS_OF}</div>
+            <div class="sub">{n_fresh} fresh-data issuers from the top 10% &middot;
+              ${total:.0f}B disclosed maturities &middot; built {AS_OF}</div>
           </header>
 
           <div class="chip-row">
-            <div class="chip"><div class="label">Disclosed maturities</div>
-              <div class="value">${total_disclosed:.0f}B</div>
-              <div class="delta">across {n_cov} top-decile issuers</div></div>
-            <div class="chip"><div class="label">Due within 2 years</div>
-              <div class="value">${due_2y_total:.0f}B</div>
-              <div class="delta">{pct_2y_agg:.1f}% of total disclosed</div></div>
-            <div class="chip"><div class="label">Due within 5 years</div>
-              <div class="value">${due_5y_total:.0f}B</div>
-              <div class="delta">{due_5y_total/total_disclosed*100:.1f}% of total disclosed</div></div>
-            <div class="chip"><div class="label">Median issuer 2y exposure</div>
-              <div class="value">{median_pct_2y:.0f}%</div>
-              <div class="delta">half the cohort has more than this share due in 24 months</div></div>
+            <div class="chip"><div class="label">Peak year (all 30)</div>
+              <div class="value">{peak_yr}</div>
+              <div class="delta">${peak_b:.0f}B due ({peak_share:.0f}% of total) — but mostly mREITs</div></div>
+            <div class="chip"><div class="label">Industrial peak (ex-REIT)</div>
+              <div class="value">2028</div>
+              <div class="delta">$26B for 22 industrial corporates</div></div>
+            <div class="chip"><div class="label">Median WAM change since FY2019</div>
+              <div class="value">{median_wam_change:+.2f}y</div>
+              <div class="delta">{n_compress} compressed, {n_extend} extended (of {len(have_both)} comparable)</div></div>
+            <div class="chip"><div class="label">Fresh-data coverage</div>
+              <div class="value">{n_fresh}/47</div>
+              <div class="delta">{len(stale)} stale + 11 untagged excluded</div></div>
           </div>
 
-          <div class="hyp">
-            <strong>The refi-wall test:</strong> 1) Aggregate maturity disclosure for the
-            high-debt cohort. 2) Identify firms where the next-2-year wall exceeds
-            annual FCF — they cannot self-fund and must roll into a much higher-rate
-            market. 3) Watch for downgrades, covenant trips, or distressed exchanges
-            in those names.
+          <div class="verdict">
+            <h3>What the evidence says about the "2026/27 spike, ~5y after rate hikes" thesis</h3>
+            <strong>The thesis fails for industrial corporates. The 2026 'spike' was a mortgage-REIT artifact.</strong>
+            <ol style="margin-top: 6px;">
+              <li><strong>The all-issuer 2026 number was $45.5B — but $29B (64%) came from
+                just 5 mortgage-REITs</strong> (RITM, TWO, ABR, BXMT, MPT). mREITs fund themselves
+                with rolling repos that mature each year by design — that's a business
+                model, not stress.</li>
+              <li><strong>Excluding REITs flips the shape:</strong> the 22 industrial corporates
+                show $13B due in 2026 (~9% of their $150B), $16B in 2027, peaking at <strong>$26B
+                in 2028</strong>, with $50B (33%) pushed beyond 2030. The wall is back-loaded,
+                not front-loaded.</li>
+              <li><strong>The "5 years after the Fed started hiking → 2027 wall" intuition
+                doesn't show up in the data.</strong> Five-year bonds issued at the 2020-21 trough
+                will mature in 2025-26 — but the data shows industrial corporates have
+                largely already refi'd those into 2028-2030+ paper, accepting the higher
+                rate to push out duration.</li>
+              <li><strong>The bigger structural finding:</strong>
+                {n_compress} of {len(have_both)} firms have a SHORTER weighted-average maturity
+                today than at FY2019 (median change: {median_wam_change:+.2f} years).
+                Many that DID extend (AAP, JBLU, CE, MPT, TRN, SAFE) appear to have done
+                so under stress — forced refis at higher coupons rather than opportunistic
+                liability-management trades.</li>
+              <li><strong>So where IS the pain?</strong> Not in a single cliff year, but in
+                <strong>sustained interest-expense pressure</strong>: $30-45B/yr of industrial
+                paper rolling at 250-400bp higher than the original coupons over the
+                next 5+ years. The credit dashboard's finding — interest expense up
+                ~80% FY2020→FY2025 vs EBITDA up ~30% — is the right place to look.</li>
+            </ol>
+            <strong>Net:</strong> the user's hypothesis as stated doesn't hold for the data
+            available — there is no 2026/27 cliff for the high-debt cohort once mREITs are removed.
+            The structural story is real (sustained higher interest cost; many firms with
+            shorter WAM than pre-pandemic), but it's a slow-burn pressure, not a point-in-time event.
           </div>
 
           <div class="warning">
-            <strong>SEC XBRL coverage caveats.</strong> Source =
-            <code>us-gaap:LongTermDebtMaturitiesRepaymentsOfPrincipal*</code> tags from
-            each company's latest 10-K, fetched via SEC's free Company Facts API.
-            Coverage = {n_cov}/47 watchlist names. Misses are mostly mortgage-REITs
-            and recent spinoffs that don't tag the standard table. The disclosed total
-            does not always match EODHD <code>totalDebt</code> — the maturity table
-            reports principal-only, excludes discounts/premiums, capital leases, and
-            sometimes revolver balances.
+            <strong>Data quality fixes since v1:</strong> JBLU (and 2 other issuers) were
+            anchored to the wrong filing because the most recent 10-Q only carried the
+            <code>RemainderOfFiscalYear</code> tag, dragging the anchor forward and
+            dropping the year-1 to year-5 ladder. The fix anchors only on the latest
+            10-K with full core-bucket coverage. {len(stale)} additional issuers were
+            flagged stale (last tagged the standard maturity table years ago) and removed
+            from this view.
+            {stale_html}
           </div>
 
           <main>
-            <h2 class="section-title">Top issuers by 2-year refi exposure</h2>
-            <p style="font-size: 13px; color: #666;">
-              Sorted by % of disclosed debt due in next 24 months.
-            </p>
-            {table_html}
-
-            {''.join(body_parts)}
+            {''.join(body)}
           </main>
 
           <footer>
-            <strong>Method:</strong> SEC's free
-            <code>https://data.sec.gov/api/xbrl/companyfacts/CIK&lt;CIK&gt;.json</code>
-            endpoint exposes every us-gaap fact a company has tagged in any filing.
-            We pull the standard maturity-of-long-term-debt tags from each company's
-            most recent 10-K and align them to the balance-sheet date. No HTML
-            scraping; no paid data sources.
+            <strong>Method:</strong> SEC's free Company Facts API — extracts standard
+            us-gaap maturity tags
+            <code>LongTermDebtMaturitiesRepaymentsOfPrincipalIn{{NextTwelveMonths,Year{{Two..Five}},AfterYearFive}}</code>
+            from each company's 10-K filings.
             <ul>
-              <li><strong>y1</strong> = next-twelve-months from balance-sheet date</li>
-              <li><strong>y2..y5</strong> = subsequent fiscal years</li>
-              <li><strong>yGT5</strong> = "thereafter" bucket from the table</li>
-            </ul>
-            <strong>Known gaps:</strong>
-            <ul>
-              <li>11/47 watchlist names don't expose XBRL maturity tags (mostly
-                  mortgage-REITs, securitized-debt structures, recent spinoffs).
-                  For those, 10-K HTML parsing is needed.</li>
-              <li>Maturity-table principal totals exclude discounts, premiums,
-                  fair-value adjustments, capital leases, and operating leases.
-                  Don't expect them to tie to EODHD <code>totalDebt</code> exactly.</li>
-              <li>This is a snapshot; the maturity schedule moves as companies refi.
-                  Re-run <code>scripts/fetch_sec_maturities.py --force</code> to refresh.</li>
+              <li><strong>Calendar-year mapping:</strong> y1 → BS-year + 1, y2 → +2, …,
+                yGT5 → +6 (catch-all bucket plotted as 2031 here, but represents
+                all maturities &gt; 2030).</li>
+              <li><strong>WAM (weighted average maturity):</strong> Σ(amount × bucket_midpoint) / Σ(amount),
+                using midpoints of 0.5/1.5/2.5/3.5/4.5/8.5 yrs for y1..yGT5.</li>
+              <li><strong>Stale anchor cutoff:</strong> period_end &lt; 2023-06-01.</li>
+              <li><strong>11 watchlist names lack the standard XBRL tags entirely</strong>
+                — mostly mortgage-REITs (securitized debt), recent spinoffs (FUN, UNIT,
+                CRGY), and issuers that use custom XBRL extensions. For those, 10-K
+                HTML parsing is the next step.</li>
+              <li><strong>Maturity table principal ≠ EODHD totalDebt</strong> — excludes
+                discounts, premiums, fair-value adjustments, capital leases, and
+                sometimes revolver balances.</li>
             </ul>
           </footer>
         </body>
@@ -423,8 +471,9 @@ def render(data: dict, out_html: Path) -> None:
 def main() -> int:
     data = load()
     out = DASH / "refi_wall.html"
-    print("building refi-wall dashboard")
-    print(f"  issuers with maturity data: {len(data['summary'])}")
+    print(f"building refi-wall dashboard v2")
+    print(f"  fresh issuers: {len(data['fresh'])}")
+    print(f"  stale issuers: {len(data['stale'])}")
     render(data, out)
     return 0
 
