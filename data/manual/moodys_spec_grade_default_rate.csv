@@ -1,0 +1,13 @@
+period,us_spec_grade_default_rate_pct,frequency,source_note
+2019-12,,annual,"Global spec-grade trailing-12M default rate was 3.2% at end-2019 per Moody's (cited via S&P Global MI). US-specific year-end 2019 figure not extracted from free summaries."
+2020-12,,annual,"Global spec-grade trailing-12M rate ended 2020 at 6.7% (S&P Global MI citing Moody's). US-specific figure not cleanly extracted; Moody's forecast peak ~9.1% by Mar 2021."
+2021-03,9.1,monthly,"Moody's forecast US spec-grade trailing-12M peak of ~9.1% in Mar 2021 (S&P Global MI summary)."
+2021-12,,annual,"Moody's-rated defaults fell to very low levels by end-2021; exact US spec-grade TTM year-end figure not in free summaries."
+2022-09,1.5,monthly,"Moody's: 12-month trailing default rate for US non-financial spec-grade companies was 1.5% at end-Sep 2022 (Moody's Q1 2024 Credit Outlook, via cfodive.com)."
+2022-12,,annual,"Global spec-grade TTM rose to 2.9% at end-2022 (Moody's via LinkedIn). US-specific year-end 2022 rate not cleanly extracted."
+2023-12,5.6,annual,"US spec-grade TTM default rate closed 2023 at 5.6% (Moody's December 2023 Default Report)."
+2024-03,5.6,monthly,"US spec-grade 12-month realized default rate was 5.6% as of Mar 2024 (Moody's)."
+2024-12,,annual,"US spec-grade TTM year-end 2024 not cleanly extracted from free summaries; distressed exchanges = highest annual share on record."
+2025-09,3.7,monthly,"Moody's: through Sep 2025, US issuer-weighted trailing 12M HY bond default rate = 3.7%; leveraged loan default rate = 5.9%. Bond figure used here as the spec-grade bond rate."
+2025-12,3.2,annual,"Moody's projected US HY realized default rate = 3.2% for CY2025; loan rate projected 7.5%. Projection figure — confirm with actual year-end report."
+2026-Q1,4.0,quarterly,"Moody's projects US HY default rate rising above 4% by Q1 2026; leveraged loan rate 7.9% in Q1 2026."

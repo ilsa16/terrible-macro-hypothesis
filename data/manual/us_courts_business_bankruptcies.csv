@@ -1,0 +1,11 @@
+period,frequency,business_filings,chapter_7,chapter_11,chapter_13,source_note
+2019-12,annual,22780,,,,"12-month period ending Dec 31, 2019. Business filings rose 2.5% from 22,232 to 22,780. Chapter breakdowns in press releases are totals (business + nonbusiness) so business-only by chapter left blank. Source: uscourts.gov press release Jan 28, 2020."
+2020-12,annual,21655,,,,"12-month period ending Dec 31, 2020. Business filings down from 22,780; note Ch 11 TOTAL (bus+nonbus) rose 18.7% to 8,333 in 2020 (of which 7,786 were business reorganizations per the press release). Source: uscourts.gov press release Jan 28, 2021."
+2021-12,annual,14347,,,,"12-month period ending Dec 31, 2021. Business filings fell 33.7% from 21,655 to 14,347 (pandemic stimulus). Source: uscourts.gov press release Feb 4, 2022."
+2022-12,annual,13481,,,,"12-month period ending Dec 31, 2022. Business filings fell 6% from 14,347. Source: uscourts.gov press release Feb 6, 2023."
+2023-12,annual,18926,,,,"12-month period ending Dec 31, 2023. Business filings rose 40.4% from 13,481. Source: uscourts.gov press release Jan 26, 2024."
+2024-12,annual,23107,,,,"12-month period ending Dec 31, 2024. Business filings rose 22.1% from 18,926. Source: uscourts.gov press release Feb 4, 2025."
+2025-03,trailing12m,23309,,,,"Trailing 12 months ending Mar 31, 2025. +14.7% YoY. Source: uscourts.gov press release May 1, 2025."
+2025-06,trailing12m,23043,,,,"Trailing 12 months ending Jun 30, 2025. +4.5% YoY. Source: uscourts.gov press release Jul 31, 2025."
+2025-09,trailing12m,24039,,,,"Trailing 12 months ending Sep 30, 2025. +5.6% YoY. Source: uscourts.gov press release Nov 24, 2025."
+2025-12,annual,24737,,,,"12-month period ending Dec 31, 2025. Business filings rose 7.1% from 23,107. Source: uscourts.gov press release Feb 4, 2026."

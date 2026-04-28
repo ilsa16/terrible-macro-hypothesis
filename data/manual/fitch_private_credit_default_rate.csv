@@ -1,0 +1,21 @@
+period,us_private_credit_default_rate_pct,frequency,source_note
+2024-08,5.0,monthly,"Fitch PCDR launched August 2024 at 5.0% TTM. Source: Bloomberg (Fitch Ratings Says Private Credit Default Rate Stands at 5, Sep 26 2024)."
+2024-09,4.7,monthly,"TTM through September 2024. Source: Funds Society / Fitch."
+2024-10,,monthly,
+2024-11,5.2,monthly,"TTM through November 2024. Source: Funds Society / Fitch."
+2024-12,4.6,monthly,"TTM through December 2024. Source: privatedebtinvestor / Fitch commentary."
+2025-01,,monthly,
+2025-02,5.7,monthly,"TTM through February 2025. Source: privatedebtinvestor (Fitch: US private credit default rate hit 5.7% in February)."
+2025-03,,monthly,
+2025-04,,monthly,
+2025-05,,monthly,
+2025-06,5.5,monthly,"TTM through June 2025. Source: LinkedIn Fitch Ratings post (July 2025)."
+2025-07,5.2,monthly,"TTM through July 2025. Source: LinkedIn Fitch Ratings post (Aug 2025)."
+2025-08,,monthly,
+2025-09,,monthly,
+2025-10,5.2,monthly,"TTM through October 2025. Source: dmarketforces (citing Fitch)."
+2025-11,5.7,monthly,"TTM through November 2025. Source: dmarketforces / Fitch commentary."
+2025-12,5.6,monthly,"TTM through December 2025. Source: Funds Society / Fitch."
+2026-01,5.8,monthly,"TTM through January 2026. Source: Funds Society / Fitch. Highest since inception."
+2024,8.1,annual,"Fitch: calendar-year 2024 default rate in US privately monitored ratings (PMR) portfolio = 8.1% (distinct from PCDR TTM series). Source: LinkedIn Bridge Business Credit / Reuters."
+2025,9.2,annual,"Fitch: calendar-year 2025 default rate in US PMR portfolio = 9.2% (record). Source: LinkedIn Bridge Business Credit / Reuters."

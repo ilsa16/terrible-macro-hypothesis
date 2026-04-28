@@ -1,0 +1,21 @@
+ticker,name,gics_sector,gics_sub_industry,hq,eodhd_ticker
+SSTK,"Shutterstock, Inc.",Communication Services,Interactive Media & Services,"New York City, New York",SSTK.US
+LUMN,Lumen Technologies,Communication Services,Alternative Carriers,"Monroe, Louisiana",LUMN.US
+PRSU,"Pursuit Attractions & Hospitality, Inc.",Consumer Discretionary,"Hotels, Resorts & Cruise Lines","Scottsdale, Arizona",PRSU.US
+ETD,"Ethan Allen Interiors, Inc.",Consumer Discretionary,Home Furnishings,"Danbury, Connecticut",ETD.US
+SMPL,Simply Good Foods Company,Consumer Staples,Packaged Foods & Meats,"Denver, Colorado",SMPL.US
+CENT,Central Garden & Pet Company,Consumer Staples,Household Products,"Walnut Creek, California",CENT.US
+LPG,Dorian LPG Ltd.,Energy,Oil & Gas Storage & Transportation,"Stamford, Connecticut",LPG.US
+TDW,"Tidewater, Inc.",Energy,Oil & Gas Equipment & Services,"Houston, Texas",TDW.US
+HOPE,"Hope Bancorp, Inc.",Financials,Regional Banks,"Los Angeles, California",HOPE.US
+SFBS,"ServisFirst Bancshares, Inc.",Financials,Regional Banks,"Birmingham, Alabama",SFBS.US
+CNMD,CONMED Corporation,Health Care,Health Care Equipment,"Largo, Florida",CNMD.US
+INVA,"Innoviva, Inc.",Health Care,Pharmaceuticals,"Burlingame, California",INVA.US
+MRCY,Mercury Systems,Industrials,Electrical Components & Equipment,"Andover, Massachusetts",MRCY.US
+MWA,Mueller Water Products,Industrials,Industrial Machinery & Supplies & Components,"Atlanta, Georgia",MWA.US
+NSSC,Napco Security Technologies,Information Technology,Electronic Equipment & Instruments,"Amityville, New York",NSSC.US
+RNG,"RingCentral, Inc.",Information Technology,Application Software,"Belmont, California",RNG.US
+LNN,Lindsay Corporation,Materials,Agricultural & Farm Machinery,"Omaha, Nebraska",LNN.US
+OI,"O-I Glass, Inc.",Materials,"Metal, Glass & Plastic Containers","Perrysburg, Ohio",OI.US
+ARI,Apollo Commercial Real Estate Finance,Real Estate,Mortgage REITs,"New York City, New York",ARI.US
+WSR,Whitestone REIT,Real Estate,Retail REITs,"Houston, Texas",WSR.US

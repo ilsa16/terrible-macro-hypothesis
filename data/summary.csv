@@ -1,0 +1,13 @@
+metric,latest,latest_date,change_since_2005,change_since_2019,unit,source,frequency,notes
+U.S. nonfinancial corporate debt,"$14,183B",2025-Q4,+166.5% (CAGR 4.8%),+35.0% (CAGR 4.5%),USD billions,FRED BCNSDODNS (Federal Reserve Z.1),quarterly,Official aggregate; latest point may lag 1-2 quarters.
+Moody's Aaa corporate yield,5.38%,2026-04-22,+0.15pp vs 2005 avg,+1.99pp vs 2019 avg,percent,FRED DAAA,daily,Long-history IG/BBB cost-of-debt proxy.
+Moody's Baa corporate yield,5.99%,2026-04-22,-0.07pp vs 2005 avg,+1.62pp vs 2019 avg,percent,FRED DBAA,daily,Long-history IG/BBB cost-of-debt proxy.
+ICE BofA IG yield,5.00%,2026-04-22,n/a (series starts 2023),-0.68pp vs 2023 avg,percent,FRED BAMLC0A0CMEY,daily,FRED retains only ~3yr of ICE BofA daily history.
+ICE BofA BBB yield,5.19%,2026-04-22,n/a (series starts 2023),-0.76pp vs 2023 avg,percent,FRED BAMLC0A4CBBBEY,daily,FRED retains only ~3yr of ICE BofA daily history.
+ICE BofA HY yield,6.75%,2026-04-22,n/a (series starts 2023),-1.70pp vs 2023 avg,percent,FRED BAMLH0A0HYM2EY,daily,FRED retains only ~3yr of ICE BofA daily history.
+BBB OAS,0.99%,2026-04-22,n/a,-0.58pp vs 2023 avg,percent,FRED BAMLC0A4CBBB,daily,Separates spread from Treasury-rate moves. 3yr history only.
+Total corporate bonds outstanding (SIFMA),"$11,500B",2025Q3,n/a (2024+ only in free summary),n/a (2024+ only in free summary),USD billions,SIFMA Research Quarterly,quarterly,Bond market only; excludes loans & private credit.
+Annual IG+HY issuance,"$2,000B",2024,sparse back-history,sparse back-history,USD billions,SIFMA,annual,See data/manual/sifma_ig_hy_issuance.md.
+Moody's U.S. spec-grade default rate (TTM),3.7%,2025-09,n/a (series sparse),n/a (series sparse),percent,Moody's Investors Service,monthly (sparse),Many gaps; free summaries do not cover every month.
+U.S. business bankruptcy filings (annual),"24,737",2025-12,n/a (manual CSV starts 2019),+8.6% vs 2019,filings,U.S. Courts (AOUSC press releases),annual,Full 2019-2025 coverage. Extend via uscourts.gov Table F-2 archive for 2005+.
+"Fitch U.S. private credit default rate (PCDR, TTM)",5.8%,2026-01,n/a (launched Aug 2024),+0.8pp since series launch (2024-08),percent,Fitch Ratings,monthly,Series launched Aug 2024 — no pre-2024 comparable.
